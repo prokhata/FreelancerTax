@@ -1,0 +1,5 @@
+.streamlit/secrets.toml
+freelancertaxprokhata-b39793a92c5b.json
+__pycache__/
+*.pyc
+.DS_Store
