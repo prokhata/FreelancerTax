@@ -34,7 +34,6 @@ CESS_RATE = 0.04
 GST_EXPORT_THRESHOLD = 2000000  # ₹20L for services
 ADVANCE_TAX_TRIGGER = 10000
 
-SERVICE_ACCOUNT_FILE = Path(__file__).parent / "freelancertaxprokhata-b39793a92c5b.json"
 GOOGLE_SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 GOOGLE_SHEET_ID = st.secrets.get("google_sheets", {}).get("sheet_id", "")
 GOOGLE_SHEET_RANGE = st.secrets.get("google_sheets", {}).get("range", "Sheet1!A:Z")
@@ -291,11 +290,6 @@ def get_google_sheets_service() -> Optional[object]:
         except Exception:
             credentials = None
 
-    if credentials is None and SERVICE_ACCOUNT_FILE.exists():
-        credentials = service_account.Credentials.from_service_account_file(
-            str(SERVICE_ACCOUNT_FILE), scopes=GOOGLE_SHEETS_SCOPES
-        )
-
     if credentials is None:
         return None
 
@@ -312,8 +306,7 @@ def append_row_to_google_sheet(row_values: list[object]) -> tuple[bool, str]:
     if service is None:
         fallback_hint = (
             "Verify that `google-auth` and `google-api-python-client` are installed, "
-            "and that the service account JSON file exists either as `SERVICE_ACCOUNT_JSON` in secrets "
-            "or as the file `freelancertaxprokhata-b39793a92c5b.json` in the app folder."
+            "and that the service account JSON file is in `SERVICE_ACCOUNT_JSON` in secrets."
         )
         return False, (
             "Google Sheets client could not be created. " + fallback_hint
