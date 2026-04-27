@@ -1,6 +1,9 @@
+from datetime import datetime
 from html import escape
+from pathlib import Path
 from textwrap import dedent
 from typing import Optional
+import json
 
 import pandas as pd
 import streamlit as st
@@ -30,6 +33,12 @@ REBATE_MAX = 60000
 CESS_RATE = 0.04
 GST_EXPORT_THRESHOLD = 2000000  # ₹20L for services
 ADVANCE_TAX_TRIGGER = 10000
+
+SERVICE_ACCOUNT_FILE = Path(__file__).parent / "freelancertaxprokhata-b39793a92c5b.json"
+GOOGLE_SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+GOOGLE_SHEET_ID = st.secrets.get("google_sheets", {}).get("sheet_id", "")
+GOOGLE_SHEET_RANGE = st.secrets.get("google_sheets", {}).get("range", "Sheet1!A:Z")
+SERVICE_ACCOUNT_JSON = st.secrets.get("google_sheets", {}).get("service_account_json", "")
 
 FOREX_DEFAULTS = {
     "USD": 85.50,
@@ -263,6 +272,64 @@ def amount_tone(value: float) -> str:
     if value > 0:
         return "positive"
     return "neutral"
+
+
+def get_google_sheets_service() -> Optional[object]:
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+    except ImportError:
+        return None
+
+    credentials = None
+    if SERVICE_ACCOUNT_JSON:
+        try:
+            account_info = json.loads(SERVICE_ACCOUNT_JSON)
+            credentials = service_account.Credentials.from_service_account_info(
+                account_info, scopes=GOOGLE_SHEETS_SCOPES
+            )
+        except Exception:
+            credentials = None
+
+    if credentials is None and SERVICE_ACCOUNT_FILE.exists():
+        credentials = service_account.Credentials.from_service_account_file(
+            str(SERVICE_ACCOUNT_FILE), scopes=GOOGLE_SHEETS_SCOPES
+        )
+
+    if credentials is None:
+        return None
+
+    return build("sheets", "v4", credentials=credentials)
+
+
+def append_row_to_google_sheet(row_values: list[object]) -> tuple[bool, str]:
+    if not GOOGLE_SHEET_ID:
+        return False, (
+            "Google Sheet ID is not configured. Add `sheet_id` under `google_sheets` in Streamlit secrets."
+        )
+
+    service = get_google_sheets_service()
+    if service is None:
+        fallback_hint = (
+            "Verify that `google-auth` and `google-api-python-client` are installed, "
+            "and that the service account JSON file exists either as `SERVICE_ACCOUNT_JSON` in secrets "
+            "or as the file `freelancertaxprokhata-b39793a92c5b.json` in the app folder."
+        )
+        return False, (
+            "Google Sheets client could not be created. " + fallback_hint
+        )
+
+    try:
+        service.spreadsheets().values().append(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=GOOGLE_SHEET_RANGE,
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [row_values]},
+        ).execute()
+        return True, "Row appended successfully."
+    except Exception as exc:
+        return False, f"Failed to save lead to Google Sheets: {exc}"
 
 
 def render_horizontal_bar_chart(
@@ -627,8 +694,28 @@ st.markdown(
 )
 st.caption("For Indian freelancers earning from foreign clients · CA Rajat Agrawal")
 
+# ─── Hero Section: Consultation ───────────────────────────────────────────────
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); border-radius: 12px; padding: 24px 28px; margin: 20px 0; color: white;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+            <div>
+                <h2 style="margin: 0 0 8px 0; font-size: 1.5rem; color: white;">💼 Need Personalized Tax Guidance?</h2>
+                <p style="margin: 0 0 16px 0; font-size: 0.95rem; color: #e0e0ff; line-height: 1.5;">
+                    Our Chartered Accountants will analyze your specific situation and help you optimize your tax position.
+                    Book a consultation call with an expert.
+                </p>
+                <a href="https://prokhata.com/product/consultation-call-with-chartered-accountant/" target="_blank" style="display: inline-block; background: white; color: #4f46e5; padding: 10px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 0.95rem;">
+                    📅 Book Consultation Call →
+                </a>
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 st.sidebar.markdown("## 📋 Your Details")
 
@@ -846,19 +933,144 @@ with gst_col2:
 
 # ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-dashboard_tab, explanation_tab, comparison_tab, planning_tab, compliance_tab, lead_tab = st.tabs(
+lead_tab, dashboard_tab, explanation_tab, comparison_tab, planning_tab, compliance_tab = st.tabs(
     [
+        "📞 Submit Details",
         "📊 Dashboard",
         "📖 Tax Explained",
         "⚖️ 44ADA vs Actual",
         "📅 Planning",
         "🌐 Export Compliance",
-        "📞 Callback",
     ]
 )
 
 
-# ═══ DASHBOARD TAB ════════════════════════════════════════════════════════════
+# ═══ SUBMIT DETAILS TAB ═══════════════════════════════════════════════════════
+
+with lead_tab:
+    st.markdown(
+        """
+        <div class="info-card">
+            <strong>How this works:</strong><br>
+            1️⃣ Share your tax details below<br>
+            2️⃣ Our Chartered Accountant will analyze your specific situation<br>
+            3️⃣ Book a consultation call to discuss optimization strategies<br><br>
+            Your data helps us provide personalized advice during the consultation.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    lead_col1, lead_col2 = st.columns(2)
+    name = lead_col1.text_input("Your name", key="lead_name")
+    phone = lead_col2.text_input("Phone / WhatsApp number", key="lead_phone")
+
+    service_type = st.selectbox(
+        "Primary service type",
+        [
+            "IT / Software Development",
+            "Design / Creative",
+            "Consulting / Advisory",
+            "Content / Writing",
+            "Marketing / SEO",
+            "Other Professional Services",
+        ],
+        key="lead_service_type",
+    )
+
+    notes = st.text_area(
+        "What do you need help with?",
+        placeholder="Example: I bill US clients in USD via Paypal. Need help with GST-LUT, advance tax, and ITR filing.",
+        key="lead_notes",
+    )
+
+    if st.button("Submit Details to Chartered Accountant", key="lead_submit"):
+        if not name or not phone:
+            st.warning("Please enter both Name and Phone before submitting.")
+        else:
+            row_values = [
+                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                name,
+                phone,
+                service_type,
+                billing_currency,
+                foreign_receipts,
+                forex_rate,
+                receipts_inr,
+                additional_domestic_income,
+                receipts,
+                use_44ada,
+                expense_percent,
+                cash_receipt_percent,
+                expenses,
+                freelancer_income,
+                other_income,
+                total_income,
+                tax,
+                net_tax,
+                refund,
+                gst_applicable,
+                notes or "",
+            ]
+
+            sheet_saved, sheet_message = append_row_to_google_sheet(row_values)
+            st.caption(sheet_message)
+            if sheet_saved:
+                st.success("✅ Your details have been submitted to our Chartered Accountant for analysis!")
+            else:
+                st.warning(
+                    "✅ Details submitted, but Google Sheets save encountered an issue."
+                )
+
+            st.markdown("**Your Tax Summary:**")
+
+            summary_data = {
+                "Detail": [
+                    "Name",
+                    "Phone",
+                    "Service Type",
+                    "Billing Currency",
+                    "Foreign Receipts",
+                    "INR Equivalent",
+                    "Taxable Income",
+                    "Estimated Tax",
+                    "Net Payable",
+                    "Refund Estimate",
+                ],
+                "Value": [
+                    name,
+                    phone,
+                    service_type,
+                    billing_currency,
+                    money_fc(foreign_receipts, billing_currency),
+                    money(receipts_inr),
+                    money(total_income),
+                    money(tax),
+                    money(net_tax),
+                    money(refund),
+                ],
+            }
+            st.dataframe(pd.DataFrame(summary_data), hide_index=True, use_container_width=True)
+
+            if notes:
+                st.markdown(f"**Your Notes:** {notes}")
+
+            st.markdown("---")
+            st.markdown(
+                """
+                <div style="background: #f0f4ff; border-left: 4px solid #4f46e5; border-radius: 8px; padding: 16px 20px; margin: 16px 0;">
+                    <strong>📅 Next Step: Book Your Consultation</strong><br>
+                    Our CA will review your details and reach out with insights. You can also
+                    <a href="https://prokhata.com/product/consultation-call-with-chartered-accountant/" target="_blank" style="color: #4f46e5; font-weight: 600; text-decoration: none;">
+                        book a consultation call directly →
+                    </a>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+# ═══ DASHBOARD TAB ═════════════════════════════════════════════════════════════
 
 with dashboard_tab:
     st.markdown('<p class="export-header">INCOME BREAKDOWN</p>', unsafe_allow_html=True)
@@ -1286,59 +1498,8 @@ with compliance_tab:
         )
 
 
-# ═══ CALLBACK TAB ═════════════════════════════════════════════════════════════
 
-with lead_tab:
-    st.subheader("📞 Get Expert Help With Export Taxation")
-    st.markdown(
-        """
-        <div class="info-card">
-            Export freelancer taxation involves income tax, GST, FEMA, and sometimes DTAA.
-            Share your details below for a <strong>personalized review</strong> by CA Rajat Agrawal.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-    lead_col1, lead_col2 = st.columns(2)
-    name = lead_col1.text_input("Your name")
-    phone = lead_col2.text_input("Phone / WhatsApp number")
-
-    service_type = st.selectbox(
-        "Primary service type",
-        [
-            "IT / Software Development",
-            "Design / Creative",
-            "Consulting / Advisory",
-            "Content / Writing",
-            "Marketing / SEO",
-            "Other Professional Services",
-        ],
-    )
-
-    notes = st.text_area(
-        "What do you need help with?",
-        placeholder="Example: I bill US clients in USD via Paypal. Need help with GST-LUT, advance tax, and ITR filing.",
-    )
-
-    if st.button("Request Callback", type="primary"):
-        if name and phone:
-            st.success("✅ Request received! Our team will contact you within 24 hours.")
-            st.markdown("**Summary shared for review:**")
-
-            summary_data = {
-                "Detail": ["Name", "Phone", "Service Type", "Billing Currency", "Foreign Receipts", "INR Equivalent",
-                           "Taxable Income", "Estimated Tax", "Net Payable", "Refund Estimate"],
-                "Value": [name, phone, service_type, billing_currency,
-                          money_fc(foreign_receipts, billing_currency), money(receipts_inr),
-                          money(total_income), money(tax), money(net_tax), money(refund)],
-            }
-            st.dataframe(pd.DataFrame(summary_data), hide_index=True, use_container_width=True)
-
-            if notes:
-                st.markdown(f"**Notes:** {notes}")
-        else:
-            st.error("Please enter both name and phone number.")
 
 
 # ─── Footer ──────────────────────────────────────────────────────────────────
